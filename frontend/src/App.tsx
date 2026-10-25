@@ -7,7 +7,7 @@ import { ZoneCGeneration } from './components/ZoneCGeneration';
 import { ZoneDPreview } from './components/ZoneDPreview';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export const App: React.FC = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -16,6 +16,7 @@ export const App: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [svgContent, setSvgContent] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [geometry, setGeometry] = useState<GeometryState>({
     primitive_type: 'box',
@@ -74,21 +75,26 @@ export const App: React.FC = () => {
     setRotation((r) => (r + 90) % 360);
   };
 
-  const handleGenerateSVG = async () => {
+  const handleGenerateSVG = async (currentGeometry: GeometryState = geometry) => {
     setIsGenerating(true);
+    setErrorMessage(null);
     try {
       const res = await fetch(`${API_BASE_URL}/generate-svg`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(geometry)
+        body: JSON.stringify(currentGeometry)
       });
 
       if (res.ok) {
         const svgText = await res.text();
         setSvgContent(svgText);
+      } else {
+        const errText = await res.text();
+        setErrorMessage(`Erreur serveur (${res.status}): impossible de générer les vues vectorielles. ${errText}`);
       }
     } catch (err) {
       console.error('Erreur lors de la génération du SVG:', err);
+      setErrorMessage('Impossible de contacter le serveur backend. Veuillez vérifier que le backend est démarré sur le port 8000.');
     } finally {
       setIsGenerating(false);
     }
@@ -96,8 +102,19 @@ export const App: React.FC = () => {
 
   // Initial auto-generation of SVG preview
   useEffect(() => {
-    handleGenerateSVG();
-  }, [geometry.primitive_type, geometry.width, geometry.height, geometry.depth, geometry.scale, geometry.projection_method, geometry.orientation]);
+    handleGenerateSVG(geometry);
+  }, [
+    geometry.primitive_type,
+    geometry.width,
+    geometry.height,
+    geometry.depth,
+    geometry.hole_diameter,
+    geometry.title,
+    geometry.scale,
+    geometry.projection_method,
+    geometry.orientation,
+    geometry.dimensions
+  ]);
 
   const handleAddDimension = (dim: DimensionAnnotation) => {
     const updated = {
@@ -119,6 +136,13 @@ export const App: React.FC = () => {
         </div>
       </header>
 
+      {errorMessage && (
+        <div style={{ backgroundColor: '#FEE2E2', border: '1px solid #EF4444', color: '#991B1B', padding: '12px 24px', margin: '0 24px 16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{errorMessage}</span>
+          <button onClick={() => setErrorMessage(null)} style={{ background: 'none', border: 'none', color: '#991B1B', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+        </div>
+      )}
+
       <main className="app-main">
         <div className="left-panel">
           <ZoneAImport
@@ -139,7 +163,7 @@ export const App: React.FC = () => {
           <ZoneCGeneration
             geometry={geometry}
             onChange={setGeometry}
-            onGenerate={handleGenerateSVG}
+            onGenerate={() => handleGenerateSVG(geometry)}
             isGenerating={isGenerating}
           />
         </div>
