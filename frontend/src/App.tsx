@@ -1,0 +1,159 @@
+import React, { useState, useEffect } from 'react';
+import { Compass } from 'lucide-react';
+import type { GeometryState, VisionAnalysis, DimensionAnnotation } from './types';
+import { ZoneAImport } from './components/ZoneAImport';
+import { ZoneBAnalysis } from './components/ZoneBAnalysis';
+import { ZoneCGeneration } from './components/ZoneCGeneration';
+import { ZoneDPreview } from './components/ZoneDPreview';
+import './App.css';
+
+const API_BASE_URL = 'http://localhost:8000/api';
+
+export const App: React.FC = () => {
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [rotation, setRotation] = useState<number>(0);
+  const [analysis, setAnalysis] = useState<VisionAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [svgContent, setSvgContent] = useState<string | null>(null);
+
+  const [geometry, setGeometry] = useState<GeometryState>({
+    primitive_type: 'box',
+    width: 100,
+    height: 80,
+    depth: 60,
+    hole_diameter: 30,
+    title: 'PIÈCE MÉCANIQUE',
+    scale: 1.0,
+    projection_method: 'FIRST_ANGLE',
+    orientation: 'landscape',
+    dimensions: []
+  });
+
+  const handleImageSelected = async (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setImagePreview(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+
+    // Call API vision analysis
+    setIsAnalyzing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`${API_BASE_URL}/analyze-image`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const a: VisionAnalysis = data.analysis;
+        setAnalysis(a);
+
+        // Update geometry state from vision estimation
+        setGeometry((prev) => ({
+          ...prev,
+          primitive_type: a.detected_primitive,
+          width: a.estimated_width,
+          height: a.estimated_height,
+          depth: a.estimated_depth,
+          hole_diameter: a.hole_diameter || 30
+        }));
+      }
+    } catch (err) {
+      console.warn('Erreur lors de la connexion API vision:', err);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleRotate = () => {
+    setRotation((r) => (r + 90) % 360);
+  };
+
+  const handleGenerateSVG = async () => {
+    setIsGenerating(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/generate-svg`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(geometry)
+      });
+
+      if (res.ok) {
+        const svgText = await res.text();
+        setSvgContent(svgText);
+      }
+    } catch (err) {
+      console.error('Erreur lors de la génération du SVG:', err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // Initial auto-generation of SVG preview
+  useEffect(() => {
+    handleGenerateSVG();
+  }, [geometry.primitive_type, geometry.width, geometry.height, geometry.depth, geometry.scale, geometry.projection_method, geometry.orientation]);
+
+  const handleAddDimension = (dim: DimensionAnnotation) => {
+    const updated = {
+      ...geometry,
+      dimensions: [...geometry.dimensions, dim]
+    };
+    setGeometry(updated);
+  };
+
+  return (
+    <div className="app-container">
+      <header className="app-header">
+        <div className="header-brand">
+          <Compass className="brand-icon" />
+          <div>
+            <h1>Générateur Automatique de Vues Orthogonales</h1>
+            <p className="subtitle">Dessin Technique ISO 5456-2 / NF EN ISO 128 / NF EN ISO 7200</p>
+          </div>
+        </div>
+      </header>
+
+      <main className="app-main">
+        <div className="left-panel">
+          <ZoneAImport
+            imagePreview={imagePreview}
+            onImageSelected={handleImageSelected}
+            onRotate={handleRotate}
+            rotation={rotation}
+            analysis={analysis}
+            isAnalyzing={isAnalyzing}
+          />
+
+          <ZoneBAnalysis
+            geometry={geometry}
+            onChange={setGeometry}
+            analysis={analysis}
+          />
+
+          <ZoneCGeneration
+            geometry={geometry}
+            onChange={setGeometry}
+            onGenerate={handleGenerateSVG}
+            isGenerating={isGenerating}
+          />
+        </div>
+
+        <div className="right-panel">
+          <ZoneDPreview
+            svgContent={svgContent}
+            geometry={geometry}
+            onAddDimension={handleAddDimension}
+          />
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default App;
